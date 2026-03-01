@@ -2,249 +2,366 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
+import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcrypt";
+import cors from "cors";
 import path from "path";
+import dotenv from "dotenv";
 
-const db = new Database("logistics.db");
+dotenv.config();
 
-// Initialize Database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS routes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    day_of_week TEXT NOT NULL,
-    priority_number INTEGER NOT NULL,
-    status TEXT DEFAULT 'pending', -- pending, preparing, done
-    driver_name TEXT,
-    preparer_name TEXT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || "";
 
-// Migration: Add preparer_name if it doesn't exist (for existing databases)
-// SQLite doesn't have "IF NOT EXISTS" for ADD COLUMN, so we check first
-try {
-  const tableInfo = db.prepare("PRAGMA table_info(routes)").all() as any[];
-  const hasPreparerName = tableInfo.some(col => col.name === 'preparer_name');
-  if (!hasPreparerName) {
-    console.log("Migrating: Adding preparer_name column to routes table...");
-    db.exec("ALTER TABLE routes ADD COLUMN preparer_name TEXT");
-  }
-} catch (err) {
-  console.error("Migration error:", err);
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error("Missing Supabase environment variables");
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL -- driver, preparer, admin
-  );
-
-  CREATE TABLE IF NOT EXISTS carpet_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    route_id INTEGER NOT NULL,
-    details TEXT NOT NULL,
-    driver_name TEXT,
-    status TEXT DEFAULT 'pending', -- pending, resolved
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (route_id) REFERENCES routes(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS stock_issues (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_name TEXT NOT NULL,
-    issue_type TEXT NOT NULL, -- out_of_stock, discontinued
-    reported_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-// Seed initial routes if empty
-const count = db.prepare("SELECT COUNT(*) as count FROM routes").get() as { count: number };
-if (count.count === 0) {
-  const initialData = {
-    "MONDAY": [3, 6, 59, 9, 8, 11, 12, 14, 58, 34, 37, 4, 5, 10, 43, 44, 7, 2, 97],
-    "TUESDAY": [6, 7, 11, 59, 9, 12, 37, 55, 3, 4, 5, 8, 10, 41, 43, 52, 58, 2, 97],
-    "WEDNESDAY": [3, 6, 10, 11, 59, 12, 9, 34, 37, 4, 5, 7, 8, 43, 44, 52, 55, 58, 2, 97],
-    "THURSDAY": [3, 7, 8, 59, 11, 12, 9, 54, 34, 37, 4, 5, 6, 10, 43, 44, 2, 97],
-    "FRIDAY": [3, 6, 7, 10, 11, 12, 9, 37, 52, 55, 34, 14, 58, 4, 5, 8, 41, 2, 97],
-    "SATURDAY": [4, 5, 6, 7, 8, 9, 11, 37, 44, 58, 97],
-    "SUNDAY": [4, 5, 6, 7, 11, 37, 55, 59]
-  };
-
-  const insert = db.prepare("INSERT INTO routes (day_of_week, priority_number) VALUES (?, ?)");
-  for (const [day, priorities] of Object.entries(initialData)) {
-    for (const p of priorities) {
-      insert.run(day, p);
-    }
-  }
-}
-
-// Seed initial users if empty
-const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
-if (userCount.count === 0) {
-  const insertUser = db.prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)");
-  insertUser.run("driver", "driver123", "driver");
-  insertUser.run("preparer", "prep123", "preparer");
-  insertUser.run("admin", "admin123", "admin");
-}
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server(httpServer);
+  const io = new Server(httpServer, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST", "PUT", "DELETE"]
+    }
+  });
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(cors());
 
-  // Auth Routes
-  app.post("/api/login", (req, res) => {
-    const { username, password } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE username = ? AND password = ?").get(username, password) as any;
-    if (user) {
-      res.json({ id: user.id, username: user.username, role: user.role });
-    } else {
-      res.status(401).json({ error: "Invalid credentials" });
-    }
-  });
-
-  // User Management Routes
-  app.get("/api/users", (req, res) => {
-    const users = db.prepare("SELECT id, username, role FROM users").all();
-    res.json(users);
-  });
-
-  app.post("/api/users", (req, res) => {
-    const { username, password, role } = req.body;
+  app.post("/api/login", async (req, res) => {
     try {
-      const result = db.prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)").run(username, password, role);
-      res.json({ id: result.lastInsertRowid, username, role });
+      const { username, password } = req.body;
+
+      const { data: users, error } = await supabase
+        .from("users")
+        .select("*")
+        .eq("username", username)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!users) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const passwordMatch = await bcrypt.compare(password, users.password);
+
+      if (!passwordMatch) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      res.json({ id: users.id, username: users.username, role: users.role });
+    } catch (err) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.get("/api/users", async (req, res) => {
+    try {
+      const { data: users, error } = await supabase
+        .from("users")
+        .select("id, username, role");
+
+      if (error) throw error;
+      res.json(users || []);
+    } catch (err) {
+      console.error("Error fetching users:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
+    try {
+      const { username, password, role } = req.body;
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const { data: user, error } = await supabase
+        .from("users")
+        .insert([{ username, password: hashedPassword, role }])
+        .select("id, username, role")
+        .single();
+
+      if (error) {
+        if (error.message.includes("duplicate")) {
+          return res.status(400).json({ error: "El usuario ya existe" });
+        }
+        throw error;
+      }
+
+      res.json(user);
     } catch (err: any) {
-      if (err.message.includes("UNIQUE constraint failed")) {
-        res.status(400).json({ error: "El usuario ya existe" });
-      } else {
-        res.status(500).json({ error: "Error al crear usuario" });
-      }
+      console.error("Error creating user:", err);
+      res.status(500).json({ error: "Error al crear usuario" });
     }
   });
 
-  app.delete("/api/users/:id", (req, res) => {
-    const { id } = req.params;
-    db.prepare("DELETE FROM users WHERE id = ?").run(id);
-    res.json({ success: true });
-  });
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
 
-  // API Routes
-  app.get("/api/routes", (req, res) => {
-    const routes = db.prepare("SELECT * FROM routes").all();
-    res.json(routes);
-  });
+      const { error } = await supabase
+        .from("users")
+        .delete()
+        .eq("id", parseInt(id));
 
-  app.post("/api/routes/:id/status", (req, res) => {
-    const { id } = req.params;
-    const { status, driver_name, preparer_name } = req.body;
-    db.prepare("UPDATE routes SET status = ?, driver_name = COALESCE(?, driver_name), preparer_name = COALESCE(?, preparer_name), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(status, driver_name || null, preparer_name || null, id);
-    const updatedRoute = db.prepare("SELECT * FROM routes WHERE id = ?").get();
-    io.emit("route_updated", updatedRoute);
-    res.json(updatedRoute);
-  });
-
-  app.get("/api/requests", (req, res) => {
-    const requests = db.prepare(`
-      SELECT cr.*, r.priority_number, r.day_of_week 
-      FROM carpet_requests cr 
-      JOIN routes r ON cr.route_id = r.id
-      WHERE cr.status = 'pending'
-    `).all();
-    res.json(requests);
-  });
-
-  app.post("/api/requests", (req, res) => {
-    const { route_id, details, driver_name } = req.body;
-    const result = db.prepare("INSERT INTO carpet_requests (route_id, details, driver_name) VALUES (?, ?, ?)").run(route_id, details, driver_name || null);
-    const newRequest = db.prepare(`
-      SELECT cr.*, r.priority_number, r.day_of_week 
-      FROM carpet_requests cr 
-      JOIN routes r ON cr.route_id = r.id
-      WHERE cr.id = ?
-    `).get(result.lastInsertRowid);
-    io.emit("request_created", newRequest);
-    res.json(newRequest);
-  });
-
-  app.post("/api/requests/:id/resolve", (req, res) => {
-    const { id } = req.params;
-    db.prepare("UPDATE carpet_requests SET status = 'resolved' WHERE id = ?").run(id);
-    io.emit("request_resolved", id);
-    res.json({ success: true });
-  });
-
-  app.get("/api/stock-issues", (req, res) => {
-    const issues = db.prepare("SELECT * FROM stock_issues").all();
-    res.json(issues);
-  });
-
-  app.post("/api/stock-issues", (req, res) => {
-    const { item_name, issue_type } = req.body;
-    db.prepare("INSERT INTO stock_issues (item_name, issue_type) VALUES (?, ?)").run(item_name, issue_type);
-    const issues = db.prepare("SELECT * FROM stock_issues").all();
-    io.emit("stock_updated", issues);
-    res.json({ success: true });
-  });
-
-  app.delete("/api/stock-issues/:id", (req, res) => {
-    const { id } = req.params;
-    db.prepare("DELETE FROM stock_issues WHERE id = ?").run(id);
-    const issues = db.prepare("SELECT * FROM stock_issues").all();
-    io.emit("stock_updated", issues);
-    res.json({ success: true });
-  });
-
-  app.post("/api/routes/batch-status", (req, res) => {
-    const { ids, status, driver_name, preparer_name } = req.body;
-    if (!ids || ids.length === 0) {
-      return res.json([]);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      res.status(500).json({ error: "Server error" });
     }
-    
-    const update = db.prepare("UPDATE routes SET status = ?, driver_name = COALESCE(?, driver_name), preparer_name = COALESCE(?, preparer_name), updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    
-    const transaction = db.transaction((ids, status, driver_name, preparer_name) => {
-      for (const id of ids) {
-        update.run(status, driver_name || null, preparer_name || null, id);
+  });
+
+  app.get("/api/routes", async (req, res) => {
+    try {
+      const { data: routes, error } = await supabase
+        .from("routes")
+        .select("*")
+        .order("updated_at", { ascending: false });
+
+      if (error) throw error;
+      res.json(routes || []);
+    } catch (err) {
+      console.error("Error fetching routes:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/routes/:id/status", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, driver_name, preparer_name } = req.body;
+
+      const updateData: any = { status, updated_at: new Date().toISOString() };
+      if (driver_name) updateData.driver_name = driver_name;
+      if (preparer_name) updateData.preparer_name = preparer_name;
+
+      const { data: updatedRoute, error } = await supabase
+        .from("routes")
+        .update(updateData)
+        .eq("id", parseInt(id))
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      io.emit("route_updated", updatedRoute);
+      res.json(updatedRoute);
+    } catch (err) {
+      console.error("Error updating route:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/routes/batch-status", async (req, res) => {
+    try {
+      const { ids, status, driver_name, preparer_name } = req.body;
+
+      if (!ids || ids.length === 0) {
+        return res.json([]);
       }
-    });
 
-    transaction(ids, status, driver_name, preparer_name);
-    
-    const placeholders = ids.map(() => '?').join(',');
-    const updatedRoutes = db.prepare(`SELECT * FROM routes WHERE id IN (${placeholders})`).all(...ids);
-    updatedRoutes.forEach(route => io.emit("route_updated", route));
-    res.json(updatedRoutes);
+      const updateData: any = { status, updated_at: new Date().toISOString() };
+      if (driver_name) updateData.driver_name = driver_name;
+      if (preparer_name) updateData.preparer_name = preparer_name;
+
+      const { data: updatedRoutes, error } = await supabase
+        .from("routes")
+        .update(updateData)
+        .in("id", ids)
+        .select();
+
+      if (error) throw error;
+
+      updatedRoutes?.forEach(route => io.emit("route_updated", route));
+      res.json(updatedRoutes || []);
+    } catch (err) {
+      console.error("Error batch updating routes:", err);
+      res.status(500).json({ error: "Server error" });
+    }
   });
 
-  app.get("/api/reports/summary", (req, res) => {
-    const daily = db.prepare(`
-      SELECT day_of_week, 
-             COUNT(*) as total, 
-             SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
-      FROM routes 
-      GROUP BY day_of_week
-    `).all();
+  app.get("/api/requests", async (req, res) => {
+    try {
+      const { data: requests, error } = await supabase
+        .from("carpet_requests")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-    const stock = db.prepare("SELECT * FROM stock_issues").all();
-    
-    const carpetRequests = db.prepare(`
-      SELECT r.day_of_week, COUNT(*) as count 
-      FROM carpet_requests cr
-      JOIN routes r ON cr.route_id = r.id
-      GROUP BY r.day_of_week
-    `).all();
-
-    res.json({ daily, stock, carpetRequests });
+      if (error) throw error;
+      res.json(requests || []);
+    } catch (err) {
+      console.error("Error fetching requests:", err);
+      res.status(500).json({ error: "Server error" });
+    }
   });
 
-  // Vite middleware for development
+  app.post("/api/requests", async (req, res) => {
+    try {
+      const { route_id, details, driver_name } = req.body;
+
+      const { data: route, error: routeError } = await supabase
+        .from("routes")
+        .select("day_of_week, priority_number")
+        .eq("id", route_id)
+        .single();
+
+      if (routeError) throw routeError;
+
+      const { data: newRequest, error } = await supabase
+        .from("carpet_requests")
+        .insert([{
+          route_id,
+          details,
+          driver_name,
+          day_of_week: route?.day_of_week || "",
+          priority_number: route?.priority_number || 0
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      io.emit("request_created", newRequest);
+      res.json(newRequest);
+    } catch (err) {
+      console.error("Error creating request:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/requests/:id/resolve", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const { error } = await supabase
+        .from("carpet_requests")
+        .delete()
+        .eq("id", parseInt(id));
+
+      if (error) throw error;
+
+      io.emit("request_resolved", id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error resolving request:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.get("/api/stock-issues", async (req, res) => {
+    try {
+      const { data: issues, error } = await supabase
+        .from("stock_issues")
+        .select("*")
+        .order("reported_at", { ascending: false });
+
+      if (error) throw error;
+      res.json(issues || []);
+    } catch (err) {
+      console.error("Error fetching stock issues:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/stock-issues", async (req, res) => {
+    try {
+      const { item_name, issue_type } = req.body;
+
+      const { error: insertError } = await supabase
+        .from("stock_issues")
+        .insert([{ item_name, issue_type }]);
+
+      if (insertError) throw insertError;
+
+      const { data: issues, error: fetchError } = await supabase
+        .from("stock_issues")
+        .select("*");
+
+      if (fetchError) throw fetchError;
+
+      io.emit("stock_updated", issues || []);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error creating stock issue:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.delete("/api/stock-issues/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const { error: deleteError } = await supabase
+        .from("stock_issues")
+        .delete()
+        .eq("id", parseInt(id));
+
+      if (deleteError) throw deleteError;
+
+      const { data: issues, error: fetchError } = await supabase
+        .from("stock_issues")
+        .select("*");
+
+      if (fetchError) throw fetchError;
+
+      io.emit("stock_updated", issues || []);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting stock issue:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.get("/api/reports/summary", async (req, res) => {
+    try {
+      const { data: routes, error: routesError } = await supabase
+        .from("routes")
+        .select("day_of_week, status");
+
+      if (routesError) throw routesError;
+
+      const { data: stockIssues, error: stockError } = await supabase
+        .from("stock_issues")
+        .select("*");
+
+      if (stockError) throw stockError;
+
+      const { data: requests, error: requestsError } = await supabase
+        .from("carpet_requests")
+        .select("day_of_week");
+
+      if (requestsError) throw requestsError;
+
+      const daily = routes?.reduce((acc: any, route) => {
+        const existing = acc.find((d: any) => d.day_of_week === route.day_of_week);
+        if (existing) {
+          existing.total += 1;
+          if (route.status === "done") existing.done += 1;
+        } else {
+          acc.push({
+            day_of_week: route.day_of_week,
+            total: 1,
+            done: route.status === "done" ? 1 : 0
+          });
+        }
+        return acc;
+      }, []) || [];
+
+      res.json({ daily, stock: stockIssues || [], carpetRequests: requests || [] });
+    } catch (err) {
+      console.error("Error fetching reports:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -265,7 +382,11 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Connected to Supabase at ${supabaseUrl}`);
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
