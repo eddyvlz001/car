@@ -132,12 +132,28 @@ async function startServer() {
     try {
       const { data: routes, error } = await supabase
         .from("routes")
-        .select("*")
-        .order("day_of_week", { ascending: true })
-        .order("priority_number", { ascending: true });
+        .select("*");
 
       if (error) throw error;
-      res.json(routes || []);
+
+      // Sort routes by day of week (proper order) and priority number
+      const dayOrder: { [key: string]: number } = {
+        'MONDAY': 1,
+        'TUESDAY': 2,
+        'WEDNESDAY': 3,
+        'THURSDAY': 4,
+        'FRIDAY': 5,
+        'SATURDAY': 6,
+        'SUNDAY': 7
+      };
+
+      const sortedRoutes = (routes || []).sort((a, b) => {
+        const dayDiff = dayOrder[a.day_of_week] - dayOrder[b.day_of_week];
+        if (dayDiff !== 0) return dayDiff;
+        return a.priority_number - b.priority_number;
+      });
+
+      res.json(sortedRoutes);
     } catch (err) {
       console.error("Error fetching routes:", err);
       res.status(500).json({ error: "Server error" });

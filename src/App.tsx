@@ -245,14 +245,25 @@ export default function App() {
 
   const fetchData = async () => {
     try {
+      console.log('Fetching data from API...');
       const [routesRes, requestsRes, stockRes] = await Promise.all([
         fetch('/api/routes'),
         fetch('/api/requests'),
         fetch('/api/stock-issues')
       ]);
+
+      console.log('Routes response status:', routesRes.status);
+      console.log('Requests response status:', requestsRes.status);
+      console.log('Stock response status:', stockRes.status);
+
       const routesData = await routesRes.json();
       const requestsData = await requestsRes.json();
       const stockData = await stockRes.json();
+
+      console.log('Routes loaded:', routesData.length);
+      console.log('Requests loaded:', requestsData.length);
+      console.log('Stock issues loaded:', stockData.length);
+
       setRoutes(routesData);
       setRequests(requestsData);
       setStockIssues(stockData);
@@ -765,12 +776,19 @@ function PreparerPanel({
   const [preparerName, setPreparerName] = useState(user.username);
   const [selectedDay, setSelectedDay] = useState(getDefaultDay());
 
-  const filteredRoutes = routes.filter(r => 
+  const filteredRoutes = routes.filter(r =>
     r.day_of_week === selectedDay && (
-      r.priority_number.toString().includes(filter) || 
+      r.priority_number.toString().includes(filter) ||
       r.day_of_week.toLowerCase().includes(filter.toLowerCase())
     )
   );
+
+  useEffect(() => {
+    console.log('PreparerPanel - Total routes:', routes.length);
+    console.log('PreparerPanel - Selected day:', selectedDay);
+    console.log('PreparerPanel - Filtered routes:', filteredRoutes.length);
+    console.log('PreparerPanel - Filter value:', filter);
+  }, [routes, selectedDay, filteredRoutes, filter]);
 
   const isDayFinished = useMemo(() => {
     const dayRoutes = routes.filter(r => r.day_of_week === selectedDay);
@@ -1599,6 +1617,12 @@ function DriverPanel({ user, routes, onUpdateStatus, onCreateRequest, onBatchUpd
   const [selectedDay, setSelectedDay] = useState(getDefaultDay());
 
   const targetPendingRoutes = routes.filter(r => r.day_of_week === selectedDay && r.status === 'pending');
+
+  useEffect(() => {
+    console.log('DriverPanel - Total routes:', routes.length);
+    console.log('DriverPanel - Selected day:', selectedDay);
+    console.log('DriverPanel - Pending routes for day:', targetPendingRoutes.length);
+  }, [routes, selectedDay, targetPendingRoutes]);
 
   const toggleRouteSelection = (id: number) => {
     setSelectedRouteIds(prev => 
