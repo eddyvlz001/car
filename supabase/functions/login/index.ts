@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.98.0";
-import { compare } from "npm:bcrypt@5.1.1";
+import * as bcrypt from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,7 +44,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const passwordMatch = await compare(password, users.password);
+    const passwordMatch = await bcrypt.compare(password, users.password);
 
     if (!passwordMatch) {
       return new Response(

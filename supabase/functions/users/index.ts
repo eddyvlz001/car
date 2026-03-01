@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.98.0";
-import { hash } from "npm:bcrypt@5.1.1";
+import * as bcrypt from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
     if (req.method === "POST") {
       const { username, password, role } = await req.json();
 
-      const hashedPassword = await hash(password, 10);
+      const hashedPassword = await bcrypt.hash(password, 10);
 
       const { data: user, error } = await supabase
         .from("users")
