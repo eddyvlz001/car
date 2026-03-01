@@ -21,10 +21,10 @@ Deno.serve(async (req: Request) => {
     );
 
     const url = new URL(req.url);
-    const statusMatch = url.pathname.match(/\/routes\/(\d+)\/status$/);
-    const batchMatch = url.pathname.match(/\/routes\/batch-status$/);
+    const statusMatch = url.pathname.match(/\/(\d+)\/status$/);
+    const batchMatch = url.pathname.match(/\/batch-status$/);
 
-    if (req.method === "GET" && url.pathname === "/routes") {
+    if (req.method === "GET") {
       const { data: routes, error } = await supabase
         .from("routes")
         .select("*")

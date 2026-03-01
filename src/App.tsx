@@ -58,12 +58,10 @@ function Login({ onLogin }: { onLogin: (user: UserAuth) => void }) {
     setError('');
     setLoading(true);
     try {
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`;
-      const res = await fetch(apiUrl, {
+      const res = await fetch('/api/login', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ username, password })
       });
@@ -199,14 +197,16 @@ export default function App() {
     audioRef.current.loop = true;
   }, []);
 
+  const [audioEnabled, setAudioEnabled] = useState(false);
+
   useEffect(() => {
-    if (activeAlerts.length > 0 && view === 'preparer') {
+    if (activeAlerts.length > 0 && view === 'preparer' && audioEnabled) {
       audioRef.current?.play().catch(() => {});
     } else {
       audioRef.current?.pause();
       if (audioRef.current) audioRef.current.currentTime = 0;
     }
-  }, [activeAlerts, view]);
+  }, [activeAlerts, view, audioEnabled]);
 
   useEffect(() => {
     fetchData();
@@ -245,13 +245,10 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const headers = {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-      };
       const [routesRes, requestsRes, stockRes] = await Promise.all([
-        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/routes`, { headers }),
-        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`, { headers }),
-        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-issues`, { headers })
+        fetch('/api/routes'),
+        fetch('/api/requests'),
+        fetch('/api/stock-issues')
       ]);
       const routesData = await routesRes.json();
       const requestsData = await requestsRes.json();
@@ -267,64 +264,54 @@ export default function App() {
   };
 
   const updateRouteStatus = async (id: number, status: RouteStatus, driverName?: string, preparerName?: string) => {
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/routes/${id}/status`, {
+    await fetch(`/api/routes/${id}/status`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ status, driver_name: driverName, preparer_name: preparerName })
     });
   };
 
   const updateBatchRouteStatus = async (ids: number[], status: RouteStatus, driverName?: string, preparerName?: string) => {
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/routes/batch-status`, {
+    await fetch('/api/routes/batch-status', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ ids, status, driver_name: driverName, preparer_name: preparerName })
     });
   };
 
   const createRequest = async (routeId: number, details: string, driverName: string) => {
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`, {
+    await fetch('/api/requests', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ route_id: routeId, details, driver_name: driverName })
     });
   };
 
   const resolveRequest = async (id: number) => {
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests/${id}/resolve`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-      }
+    await fetch(`/api/requests/${id}/resolve`, {
+      method: 'POST'
     });
   };
 
   const reportStockIssue = async (itemName: string, issueType: 'out_of_stock' | 'discontinued') => {
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-issues`, {
+    await fetch('/api/stock-issues', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ item_name: itemName, issue_type: issueType })
     });
   };
 
   const deleteStockIssue = async (id: number) => {
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-issues/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-      }
+    await fetch(`/api/stock-issues/${id}`, {
+      method: 'DELETE'
     });
   };
 
@@ -469,10 +456,10 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <PreparerPanel 
+              <PreparerPanel
                 user={user}
-                routes={routes} 
-                requests={requests} 
+                routes={routes}
+                requests={requests}
                 stockIssues={stockIssues}
                 onUpdateStatus={updateRouteStatus}
                 onResolveRequest={resolveRequest}
@@ -480,6 +467,8 @@ export default function App() {
                 onDeleteStock={deleteStockIssue}
                 activeAlerts={activeAlerts}
                 onDismissAlert={dismissAlert}
+                audioEnabled={audioEnabled}
+                onEnableAudio={() => setAudioEnabled(true)}
               />
             </motion.div>
           )}
@@ -738,21 +727,23 @@ function StatCard({ title, value, subtitle, icon, color }: { title: string; valu
 }
 
 // --- Preparer Panel Component ---
-function PreparerPanel({ 
+function PreparerPanel({
   user,
-  routes, 
-  requests, 
-  stockIssues, 
-  onUpdateStatus, 
+  routes,
+  requests,
+  stockIssues,
+  onUpdateStatus,
   onResolveRequest,
   onReportStock,
   onDeleteStock,
   activeAlerts,
-  onDismissAlert
-}: { 
+  onDismissAlert,
+  audioEnabled,
+  onEnableAudio
+}: {
   user: UserAuth;
-  routes: Route[]; 
-  requests: CarpetRequest[]; 
+  routes: Route[];
+  requests: CarpetRequest[];
   stockIssues: StockIssue[];
   onUpdateStatus: (id: number, status: RouteStatus, driverName?: string, preparerName?: string) => any;
   onResolveRequest: (id: number) => any;
@@ -760,6 +751,8 @@ function PreparerPanel({
   onDeleteStock: (id: number) => any;
   activeAlerts: Route[];
   onDismissAlert: (id: number) => any;
+  audioEnabled: boolean;
+  onEnableAudio: () => void;
 }) {
   const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
   
@@ -773,7 +766,6 @@ function PreparerPanel({
   const [activeTab, setActiveTab] = useState<'routes' | 'requests' | 'stock'>('routes');
   const [preparerName, setPreparerName] = useState(user.username);
   const [selectedDay, setSelectedDay] = useState(getDefaultDay());
-  const [audioEnabled, setAudioEnabled] = useState(false);
 
   const filteredRoutes = routes.filter(r => 
     r.day_of_week === selectedDay && (
@@ -795,8 +787,8 @@ function PreparerPanel({
             <Bell className="w-6 h-6 animate-bounce" />
             <p className="text-sm font-bold">Activa el sonido para recibir notificaciones de carga</p>
           </div>
-          <button 
-            onClick={() => setAudioEnabled(true)}
+          <button
+            onClick={onEnableAudio}
             className="px-6 py-2 bg-white text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-50 transition-all"
           >
             ACTIVAR SONIDO
@@ -1140,11 +1132,7 @@ function UsersPanel() {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/users`, {
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        }
-      });
+      const res = await fetch('/api/users');
       const data = await res.json();
       setUsers(data);
     } catch (err) {
@@ -1163,11 +1151,10 @@ function UsersPanel() {
     setError('');
     setSuccess('');
     try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/users`, {
+      const res = await fetch('/api/users', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ username, password, role })
       });
@@ -1189,11 +1176,8 @@ function UsersPanel() {
   const handleDeleteUser = async (id: number) => {
     if (!confirm('¿Estás seguro de que deseas eliminar este usuario?')) return;
     try {
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/users/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        }
+      const res = await fetch(`/api/users/${id}`, {
+        method: 'DELETE'
       });
       if (res.ok) {
         fetchUsers();
