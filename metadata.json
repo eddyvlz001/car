@@ -1,0 +1,5 @@
+{
+  "name": "CarpetLogix - Gestión de Rutas de Alfombras",
+  "description": "Sistema logístico para la gestión de rutas de entrega de alfombras, con paneles para conductores y preparadores, y dashboard de rendimiento en tiempo real.",
+  "requestFramePermissions": []
+}
