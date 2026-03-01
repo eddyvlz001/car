@@ -766,9 +766,21 @@ function PreparerPanel({
   onEnableAudio: () => void;
 }) {
   const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-  
+
   const getDefaultDay = () => {
     return 'MONDAY'; // Default to Monday to show the full route list
+  };
+
+  // Helper function to get the next day (delivery day based on prep day)
+  const getDeliveryDay = (prepDay: string): string => {
+    const dayIndex = days.indexOf(prepDay);
+    return days[(dayIndex + 1) % 7];
+  };
+
+  // Helper function to get the prep day (one day before delivery)
+  const getPrepDay = (deliveryDay: string): string => {
+    const dayIndex = days.indexOf(deliveryDay);
+    return days[(dayIndex - 1 + 7) % 7];
   };
 
   const [filter, setFilter] = useState('');
@@ -776,8 +788,12 @@ function PreparerPanel({
   const [preparerName, setPreparerName] = useState(user.username);
   const [selectedDay, setSelectedDay] = useState(getDefaultDay());
 
+  // Get the delivery day based on the selected prep day
+  const deliveryDay = getDeliveryDay(selectedDay);
+
+  // Filter routes by delivery day (which is one day after prep day)
   const filteredRoutes = routes.filter(r =>
-    r.day_of_week === selectedDay && (
+    r.day_of_week === deliveryDay && (
       r.priority_number.toString().includes(filter) ||
       r.day_of_week.toLowerCase().includes(filter.toLowerCase())
     )
@@ -791,9 +807,9 @@ function PreparerPanel({
   }, [routes, selectedDay, filteredRoutes, filter]);
 
   const isDayFinished = useMemo(() => {
-    const dayRoutes = routes.filter(r => r.day_of_week === selectedDay);
+    const dayRoutes = routes.filter(r => r.day_of_week === deliveryDay);
     return dayRoutes.length > 0 && dayRoutes.every(r => r.status === 'done');
-  }, [routes, selectedDay]);
+  }, [routes, deliveryDay]);
 
   return (
     <div className="space-y-6">
@@ -846,7 +862,7 @@ function PreparerPanel({
         <div className="space-y-1">
           <h2 className="text-2xl font-bold text-zinc-900">Panel de Preparación</h2>
           <p className="text-xs text-zinc-500">
-            Preparando rutas para: <span className="font-bold text-blue-600">{selectedDay}</span>
+            Preparando hoy <span className="font-bold text-blue-600">{selectedDay}</span> para entregar <span className="font-bold text-green-600">{deliveryDay}</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -898,14 +914,14 @@ function PreparerPanel({
           </div>
 
           {isDayFinished && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-center justify-between"
             >
               <div className="flex items-center gap-3 text-green-700">
                 <CheckCircle2 className="w-5 h-5" />
-                <span className="font-medium">¡Todas las rutas de {selectedDay} han sido completadas!</span>
+                <span className="font-medium">¡Todas las rutas para entregar el {deliveryDay} han sido completadas!</span>
               </div>
               <p className="text-xs text-green-600">Puedes seleccionar otro día para continuar preparando.</p>
             </motion.div>
