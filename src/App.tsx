@@ -757,9 +757,7 @@ function PreparerPanel({
   const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
   
   const getDefaultDay = () => {
-    const todayIndex = new Date().getDay();
-    const nextDayIndex = (todayIndex + 1) % 7;
-    return days[nextDayIndex];
+    return 'MONDAY'; // Default to Monday to show the full route list
   };
 
   const [filter, setFilter] = useState('');
@@ -1591,9 +1589,7 @@ function DriverPanel({ user, routes, onUpdateStatus, onCreateRequest, onBatchUpd
   const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
   
   const getDefaultDay = () => {
-    const todayIndex = new Date().getDay();
-    const nextDayIndex = (todayIndex + 1) % 7;
-    return days[nextDayIndex];
+    return 'MONDAY'; // Default to Monday to show the full route list
   };
 
   const [driverName, setDriverName] = useState(user.username);

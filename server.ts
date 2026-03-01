@@ -133,7 +133,8 @@ async function startServer() {
       const { data: routes, error } = await supabase
         .from("routes")
         .select("*")
-        .order("updated_at", { ascending: false });
+        .order("day_of_week", { ascending: true })
+        .order("priority_number", { ascending: true });
 
       if (error) throw error;
       res.json(routes || []);
