@@ -445,22 +445,9 @@ export default function App() {
       </nav>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        <div className="mb-8 flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-black text-zinc-900">¡Hola, {user.username}! 👋</h1>
-            <p className="text-zinc-500">Bienvenido de nuevo al sistema de logística en tiempo real.</p>
-            <p className="text-xs text-zinc-400 mt-1">Rutas cargadas: {routes.length}</p>
-          </div>
-          <button
-            onClick={() => {
-              setLoading(true);
-              fetchData();
-            }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-bold"
-          >
-            <RefreshCcw className="w-4 h-4" />
-            Recargar Datos
-          </button>
+        <div className="mb-8">
+          <h1 className="text-3xl font-black text-zinc-900">¡Hola, {user.username}! 👋</h1>
+          <p className="text-zinc-500">Bienvenido de nuevo al sistema de logística en tiempo real.</p>
         </div>
         <AnimatePresence mode="wait">
           {view === 'dashboard' && (
@@ -875,13 +862,6 @@ function PreparerPanel({
 
       {activeTab === 'routes' && (
         <div className="space-y-4">
-          {/* Debug Info */}
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs">
-            <p className="font-bold text-yellow-800">Debug Info:</p>
-            <p className="text-yellow-700">Total rutas cargadas: {routes.length}</p>
-            <p className="text-yellow-700">Rutas filtradas para {selectedDay}: {filteredRoutes.length}</p>
-          </div>
-
           <div className="flex flex-col md:flex-row gap-4">
             <div className="relative w-full md:w-48">
               <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
@@ -1681,13 +1661,6 @@ function DriverPanel({ user, routes, onUpdateStatus, onCreateRequest, onBatchUpd
       </div>
 
       <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm space-y-6">
-        {/* Debug Info */}
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs">
-          <p className="font-bold text-yellow-800">Debug Info:</p>
-          <p className="text-yellow-700">Total rutas cargadas: {routes.length}</p>
-          <p className="text-yellow-700">Rutas pendientes para {selectedDay}: {targetPendingRoutes.length}</p>
-        </div>
-
         <div className="space-y-4">
           <h3 className="font-bold flex items-center gap-2">
             <User className="w-5 h-5 text-blue-600" />
