@@ -36,6 +36,7 @@ async function startServer() {
   app.post("/api/login", async (req, res) => {
     try {
       const { username, password } = req.body;
+      console.log("Login attempt for username:", username);
 
       const { data: users, error } = await supabase
         .from("users")
@@ -43,18 +44,26 @@ async function startServer() {
         .eq("username", username)
         .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Database error:", error);
+        throw error;
+      }
 
       if (!users) {
+        console.log("User not found:", username);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      console.log("User found, checking password...");
       const passwordMatch = await bcrypt.compare(password, users.password);
+      console.log("Password match result:", passwordMatch);
 
       if (!passwordMatch) {
+        console.log("Password does not match for user:", username);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      console.log("Login successful for user:", username);
       res.json({ id: users.id, username: users.username, role: users.role });
     } catch (err) {
       console.error("Login error:", err);
