@@ -58,9 +58,13 @@ function Login({ onLogin }: { onLogin: (user: UserAuth) => void }) {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch('/api/login', {
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`;
+      const res = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
         body: JSON.stringify({ username, password })
       });
       if (res.ok) {
@@ -241,10 +245,13 @@ export default function App() {
 
   const fetchData = async () => {
     try {
+      const headers = {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      };
       const [routesRes, requestsRes, stockRes] = await Promise.all([
-        fetch('/api/routes'),
-        fetch('/api/requests'),
-        fetch('/api/stock-issues')
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/routes`, { headers }),
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`, { headers }),
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-issues`, { headers })
       ]);
       const routesData = await routesRes.json();
       const requestsData = await requestsRes.json();
@@ -260,43 +267,65 @@ export default function App() {
   };
 
   const updateRouteStatus = async (id: number, status: RouteStatus, driverName?: string, preparerName?: string) => {
-    await fetch(`/api/routes/${id}/status`, {
+    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/routes/${id}/status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      },
       body: JSON.stringify({ status, driver_name: driverName, preparer_name: preparerName })
     });
   };
 
   const updateBatchRouteStatus = async (ids: number[], status: RouteStatus, driverName?: string, preparerName?: string) => {
-    await fetch('/api/routes/batch-status', {
+    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/routes/batch-status`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      },
       body: JSON.stringify({ ids, status, driver_name: driverName, preparer_name: preparerName })
     });
   };
 
   const createRequest = async (routeId: number, details: string, driverName: string) => {
-    await fetch('/api/requests', {
+    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      },
       body: JSON.stringify({ route_id: routeId, details, driver_name: driverName })
     });
   };
 
   const resolveRequest = async (id: number) => {
-    await fetch(`/api/requests/${id}/resolve`, { method: 'POST' });
+    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/requests/${id}/resolve`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      }
+    });
   };
 
   const reportStockIssue = async (itemName: string, issueType: 'out_of_stock' | 'discontinued') => {
-    await fetch('/api/stock-issues', {
+    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-issues`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      },
       body: JSON.stringify({ item_name: itemName, issue_type: issueType })
     });
   };
 
   const deleteStockIssue = async (id: number) => {
-    await fetch(`/api/stock-issues/${id}`, { method: 'DELETE' });
+    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-issues/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+      }
+    });
   };
 
   const dismissAlert = (routeId: number) => {
@@ -1111,7 +1140,11 @@ function UsersPanel() {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users');
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/users`, {
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        }
+      });
       const data = await res.json();
       setUsers(data);
     } catch (err) {
@@ -1130,9 +1163,12 @@ function UsersPanel() {
     setError('');
     setSuccess('');
     try {
-      const res = await fetch('/api/users', {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
         body: JSON.stringify({ username, password, role })
       });
       if (res.ok) {
@@ -1153,7 +1189,12 @@ function UsersPanel() {
   const handleDeleteUser = async (id: number) => {
     if (!confirm('¿Estás seguro de que deseas eliminar este usuario?')) return;
     try {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/users/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        }
+      });
       if (res.ok) {
         fetchUsers();
       }
