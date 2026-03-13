@@ -1,418 +1,305 @@
-import express from "express";
-import { createServer } from "http";
-import { Server } from "socket.io";
-import { createServer as createViteServer } from "vite";
-import { createClient } from "@supabase/supabase-js";
-import bcrypt from "bcrypt";
-import cors from "cors";
-import path from "path";
-import dotenv from "dotenv";
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import bcrypt from 'bcrypt';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
-const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || "";
+const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error("Missing Supabase environment variables");
-}
+app.use(cors());
+app.use(express.json());
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL!,
+  process.env.VITE_SUPABASE_ANON_KEY!
+);
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .maybeSingle();
+
+    if (error || !user) {
+      return res.status(401).json({ error: 'Usuario no encontrado' });
+    }
+
+    const match = await bcrypt.compare(password, user.password_hash);
+
+    if (!match) {
+      return res.status(401).json({ error: 'Contraseña incorrecta' });
+    }
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      role: user.role
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+app.get('/api/routes', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('routes')
+      .select('*')
+      .order('day')
+      .order('route_number');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo rutas' });
+  }
+});
+
+app.post('/api/routes/:id/status', async (req, res) => {
+  try {
+    const { status, driver, preparer } = req.body;
+    const updates: any = { status, updated_at: new Date().toISOString() };
+    if (driver !== undefined) updates.driver = driver;
+    if (preparer !== undefined) updates.preparer = preparer;
+
+    const { data, error } = await supabase
+      .from('routes')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    io.emit('route_updated', data);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error actualizando ruta' });
+  }
+});
+
+app.post('/api/routes/batch-status', async (req, res) => {
+  try {
+    const { ids, status, driver, preparer } = req.body;
+    const updates: any = { status, updated_at: new Date().toISOString() };
+    if (driver) updates.driver = driver;
+    if (preparer) updates.preparer = preparer;
+
+    const { data, error } = await supabase
+      .from('routes')
+      .update(updates)
+      .in('id', ids)
+      .select();
+
+    if (error) throw error;
+    data?.forEach(r => io.emit('route_updated', r));
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en actualización masiva' });
+  }
+});
+
+app.get('/api/requests', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('carpet_requests')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo solicitudes' });
+  }
+});
+
+app.post('/api/requests', async (req, res) => {
+  try {
+    const { route_id, details, driver_name } = req.body;
+
+    const { data: route } = await supabase
+      .from('routes')
+      .select('day, route_number')
+      .eq('id', route_id)
+      .single();
+
+    const { data, error } = await supabase
+      .from('carpet_requests')
+      .insert({
+        route_id,
+        details,
+        driver_name,
+        day: route?.day || '',
+        route_number: route?.route_number || 0
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    io.emit('request_created', data);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error creando solicitud' });
+  }
+});
+
+app.delete('/api/requests/:id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('carpet_requests')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+    io.emit('request_resolved', req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error eliminando solicitud' });
+  }
+});
+
+app.get('/api/stock', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('stock_issues')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo stock' });
+  }
+});
+
+app.post('/api/stock', async (req, res) => {
+  try {
+    const { item, type } = req.body;
+
+    const { data, error } = await supabase
+      .from('stock_issues')
+      .insert({ item, type })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const { data: all } = await supabase
+      .from('stock_issues')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    io.emit('stock_updated', all);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error reportando stock' });
+  }
+});
+
+app.delete('/api/stock/:id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('stock_issues')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+
+    const { data: all } = await supabase
+      .from('stock_issues')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    io.emit('stock_updated', all);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error eliminando stock' });
+  }
+});
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, username, role')
+      .order('id');
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo usuarios' });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const { username, password, role } = req.body;
+    const hash = await bcrypt.hash(password, 10);
+
+    const { data, error } = await supabase
+      .from('users')
+      .insert({ username, password_hash: hash, role })
+      .select('id, username, role')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(400).json({ error: 'Usuario ya existe' });
+      }
+      throw error;
+    }
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error creando usuario' });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error eliminando usuario' });
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+  socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
+});
 
 async function startServer() {
-  const app = express();
-  const httpServer = createServer(app);
-  const io = new Server(httpServer, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST", "PUT", "DELETE"]
-    }
-  });
-  const PORT = 3000;
-
-  app.use(express.json());
-  app.use(cors());
-
-  app.post("/api/login", async (req, res) => {
-    try {
-      const { username, password } = req.body;
-      console.log("Login attempt for username:", username);
-
-      const { data: users, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("username", username)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Database error:", error);
-        throw error;
-      }
-
-      if (!users) {
-        console.log("User not found:", username);
-        return res.status(401).json({ error: "Invalid credentials" });
-      }
-
-      console.log("User found, checking password...");
-      const passwordMatch = await bcrypt.compare(password, users.password);
-      console.log("Password match result:", passwordMatch);
-
-      if (!passwordMatch) {
-        console.log("Password does not match for user:", username);
-        return res.status(401).json({ error: "Invalid credentials" });
-      }
-
-      console.log("Login successful for user:", username);
-      res.json({ id: users.id, username: users.username, role: users.role });
-    } catch (err) {
-      console.error("Login error:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/users", async (req, res) => {
-    try {
-      const { data: users, error } = await supabase
-        .from("users")
-        .select("id, username, role");
-
-      if (error) throw error;
-      res.json(users || []);
-    } catch (err) {
-      console.error("Error fetching users:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/users", async (req, res) => {
-    try {
-      const { username, password, role } = req.body;
-
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      const { data: user, error } = await supabase
-        .from("users")
-        .insert([{ username, password: hashedPassword, role }])
-        .select("id, username, role")
-        .single();
-
-      if (error) {
-        if (error.message.includes("duplicate")) {
-          return res.status(400).json({ error: "El usuario ya existe" });
-        }
-        throw error;
-      }
-
-      res.json(user);
-    } catch (err: any) {
-      console.error("Error creating user:", err);
-      res.status(500).json({ error: "Error al crear usuario" });
-    }
-  });
-
-  app.delete("/api/users/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      const { error } = await supabase
-        .from("users")
-        .delete()
-        .eq("id", parseInt(id));
-
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (err) {
-      console.error("Error deleting user:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/routes", async (req, res) => {
-    try {
-      const { data: routes, error } = await supabase
-        .from("routes")
-        .select("*");
-
-      if (error) throw error;
-
-      // Sort routes by day of week (proper order) and priority number
-      const dayOrder: { [key: string]: number } = {
-        'MONDAY': 1,
-        'TUESDAY': 2,
-        'WEDNESDAY': 3,
-        'THURSDAY': 4,
-        'FRIDAY': 5,
-        'SATURDAY': 6,
-        'SUNDAY': 7
-      };
-
-      const sortedRoutes = (routes || []).sort((a, b) => {
-        const dayDiff = dayOrder[a.day_of_week] - dayOrder[b.day_of_week];
-        if (dayDiff !== 0) return dayDiff;
-        return a.priority_number - b.priority_number;
-      });
-
-      res.json(sortedRoutes);
-    } catch (err) {
-      console.error("Error fetching routes:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/routes/:id/status", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { status, driver_name, preparer_name } = req.body;
-
-      const updateData: any = { status, updated_at: new Date().toISOString() };
-      if (driver_name) updateData.driver_name = driver_name;
-      if (preparer_name) updateData.preparer_name = preparer_name;
-
-      const { data: updatedRoute, error } = await supabase
-        .from("routes")
-        .update(updateData)
-        .eq("id", parseInt(id))
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      io.emit("route_updated", updatedRoute);
-      res.json(updatedRoute);
-    } catch (err) {
-      console.error("Error updating route:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/routes/batch-status", async (req, res) => {
-    try {
-      const { ids, status, driver_name, preparer_name } = req.body;
-
-      if (!ids || ids.length === 0) {
-        return res.json([]);
-      }
-
-      const updateData: any = { status, updated_at: new Date().toISOString() };
-      if (driver_name) updateData.driver_name = driver_name;
-      if (preparer_name) updateData.preparer_name = preparer_name;
-
-      const { data: updatedRoutes, error } = await supabase
-        .from("routes")
-        .update(updateData)
-        .in("id", ids)
-        .select();
-
-      if (error) throw error;
-
-      updatedRoutes?.forEach(route => io.emit("route_updated", route));
-      res.json(updatedRoutes || []);
-    } catch (err) {
-      console.error("Error batch updating routes:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/requests", async (req, res) => {
-    try {
-      const { data: requests, error } = await supabase
-        .from("carpet_requests")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      res.json(requests || []);
-    } catch (err) {
-      console.error("Error fetching requests:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/requests", async (req, res) => {
-    try {
-      const { route_id, details, driver_name } = req.body;
-
-      const { data: route, error: routeError } = await supabase
-        .from("routes")
-        .select("day_of_week, priority_number")
-        .eq("id", route_id)
-        .single();
-
-      if (routeError) throw routeError;
-
-      const { data: newRequest, error } = await supabase
-        .from("carpet_requests")
-        .insert([{
-          route_id,
-          details,
-          driver_name,
-          day_of_week: route?.day_of_week || "",
-          priority_number: route?.priority_number || 0
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      io.emit("request_created", newRequest);
-      res.json(newRequest);
-    } catch (err) {
-      console.error("Error creating request:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/requests/:id/resolve", async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      const { error } = await supabase
-        .from("carpet_requests")
-        .delete()
-        .eq("id", parseInt(id));
-
-      if (error) throw error;
-
-      io.emit("request_resolved", id);
-      res.json({ success: true });
-    } catch (err) {
-      console.error("Error resolving request:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/stock-issues", async (req, res) => {
-    try {
-      const { data: issues, error } = await supabase
-        .from("stock_issues")
-        .select("*")
-        .order("reported_at", { ascending: false });
-
-      if (error) throw error;
-      res.json(issues || []);
-    } catch (err) {
-      console.error("Error fetching stock issues:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.post("/api/stock-issues", async (req, res) => {
-    try {
-      const { item_name, issue_type } = req.body;
-
-      const { error: insertError } = await supabase
-        .from("stock_issues")
-        .insert([{ item_name, issue_type }]);
-
-      if (insertError) throw insertError;
-
-      const { data: issues, error: fetchError } = await supabase
-        .from("stock_issues")
-        .select("*");
-
-      if (fetchError) throw fetchError;
-
-      io.emit("stock_updated", issues || []);
-      res.json({ success: true });
-    } catch (err) {
-      console.error("Error creating stock issue:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.delete("/api/stock-issues/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      const { error: deleteError } = await supabase
-        .from("stock_issues")
-        .delete()
-        .eq("id", parseInt(id));
-
-      if (deleteError) throw deleteError;
-
-      const { data: issues, error: fetchError } = await supabase
-        .from("stock_issues")
-        .select("*");
-
-      if (fetchError) throw fetchError;
-
-      io.emit("stock_updated", issues || []);
-      res.json({ success: true });
-    } catch (err) {
-      console.error("Error deleting stock issue:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  app.get("/api/reports/summary", async (req, res) => {
-    try {
-      const { data: routes, error: routesError } = await supabase
-        .from("routes")
-        .select("day_of_week, status");
-
-      if (routesError) throw routesError;
-
-      const { data: stockIssues, error: stockError } = await supabase
-        .from("stock_issues")
-        .select("*");
-
-      if (stockError) throw stockError;
-
-      const { data: requests, error: requestsError } = await supabase
-        .from("carpet_requests")
-        .select("day_of_week");
-
-      if (requestsError) throw requestsError;
-
-      const daily = routes?.reduce((acc: any, route) => {
-        const existing = acc.find((d: any) => d.day_of_week === route.day_of_week);
-        if (existing) {
-          existing.total += 1;
-          if (route.status === "done") existing.done += 1;
-        } else {
-          acc.push({
-            day_of_week: route.day_of_week,
-            total: 1,
-            done: route.status === "done" ? 1 : 0
-          });
-        }
-        return acc;
-      }, []) || [];
-
-      res.json({ daily, stock: stockIssues || [], carpetRequests: requests || [] });
-    } catch (err) {
-      console.error("Error fetching reports:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  });
-
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: 'spa'
     });
     app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
-    });
   }
 
-  io.on("connection", (socket) => {
-    console.log("Client connected");
-    socket.on("disconnect", () => console.log("Client disconnected"));
-  });
-
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Connected to Supabase at ${supabaseUrl}`);
+  const PORT = process.env.PORT || 3000;
+  httpServer.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
   });
 }
 
-startServer().catch(err => {
-  console.error("Failed to start server:", err);
-  process.exit(1);
-});
+startServer();
