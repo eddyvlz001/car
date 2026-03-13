@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useState } from 'react';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel';
 import DriverPanel from './components/DriverPanel';
@@ -13,16 +12,6 @@ interface User {
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
-
-  useEffect(() => {
-    const newSocket = io('http://localhost:3000');
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.close();
-    };
-  }, []);
 
   const handleLogout = () => {
     setUser(null);
@@ -52,9 +41,9 @@ function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {user.role === 'admin' && <AdminPanel socket={socket} />}
-        {user.role === 'driver' && <DriverPanel user={user} socket={socket} />}
-        {user.role === 'preparer' && <PreparerPanel user={user} socket={socket} />}
+        {user.role === 'admin' && <AdminPanel />}
+        {user.role === 'driver' && <DriverPanel user={user} />}
+        {user.role === 'preparer' && <PreparerPanel user={user} />}
       </main>
     </div>
   );

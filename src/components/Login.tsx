@@ -1,4 +1,5 @@
 import { useState, FormEvent } from 'react';
+import { login } from '../lib/auth';
 
 interface LoginProps {
   onLogin: (user: { id: number; username: string; role: 'admin' | 'driver' | 'preparer' }) => void;
@@ -16,22 +17,10 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || 'Error al iniciar sesión');
-        return;
-      }
-
-      onLogin(data);
-    } catch (err) {
-      setError('Error de conexión con el servidor');
+      const user = await login(username, password);
+      onLogin(user);
+    } catch (err: any) {
+      setError(err.message || 'Error al iniciar sesión');
     } finally {
       setLoading(false);
     }

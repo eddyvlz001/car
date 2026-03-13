@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Socket } from 'socket.io-client';
+import { supabase } from '../lib/supabase';
 
 interface Route {
   id: number;
@@ -18,10 +18,9 @@ interface User {
 
 interface DriverPanelProps {
   user: User;
-  socket: Socket | null;
 }
 
-export default function DriverPanel({ user, socket }: DriverPanelProps) {
+export default function DriverPanel({ user }: DriverPanelProps) {
   const [routes, setRoutes] = useState<Route[]>([]);
   const [selectedDay, setSelectedDay] = useState('MONDAY');
   const [selectedRoutes, setSelectedRoutes] = useState<number[]>([]);
@@ -29,21 +28,30 @@ export default function DriverPanel({ user, socket }: DriverPanelProps) {
   useEffect(() => {
     loadRoutes();
 
-    if (socket) {
-      socket.on('route_updated', (route: Route) => {
-        setRoutes(prev => prev.map(r => r.id === route.id ? route : r));
-      });
-    }
+    const channel = supabase
+      .channel('routes_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'routes' },
+        () => {
+          loadRoutes();
+        }
+      )
+      .subscribe();
 
     return () => {
-      socket?.off('route_updated');
+      supabase.removeChannel(channel);
     };
-  }, [socket]);
+  }, []);
 
   const loadRoutes = async () => {
-    const res = await fetch('/api/routes');
-    const data = await res.json();
-    setRoutes(data);
+    const { data } = await supabase
+      .from('routes')
+      .select('*')
+      .order('day')
+      .order('route_number');
+
+    if (data) setRoutes(data);
   };
 
   const dayNames: Record<string, string> = {
@@ -69,15 +77,14 @@ export default function DriverPanel({ user, socket }: DriverPanelProps) {
   const handleTakeRoutes = async () => {
     if (selectedRoutes.length === 0) return;
 
-    await fetch('/api/routes/batch-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ids: selectedRoutes,
+    await supabase
+      .from('routes')
+      .update({
         status: 'preparing',
-        driver: user.username
+        driver: user.username,
+        updated_at: new Date().toISOString()
       })
-    });
+      .in('id', selectedRoutes);
 
     setSelectedRoutes([]);
   };
@@ -85,14 +92,13 @@ export default function DriverPanel({ user, socket }: DriverPanelProps) {
   const handleCompleteRoutes = async () => {
     if (selectedRoutes.length === 0) return;
 
-    await fetch('/api/routes/batch-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ids: selectedRoutes,
-        status: 'done'
+    await supabase
+      .from('routes')
+      .update({
+        status: 'done',
+        updated_at: new Date().toISOString()
       })
-    });
+      .in('id', selectedRoutes);
 
     setSelectedRoutes([]);
   };

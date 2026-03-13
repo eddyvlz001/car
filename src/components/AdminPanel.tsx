@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Socket } from 'socket.io-client';
+import { supabase } from '../lib/supabase';
 
 interface Route {
   id: number;
@@ -10,31 +10,36 @@ interface Route {
   preparer: string | null;
 }
 
-interface AdminPanelProps {
-  socket: Socket | null;
-}
-
-export default function AdminPanel({ socket }: AdminPanelProps) {
+export default function AdminPanel() {
   const [routes, setRoutes] = useState<Route[]>([]);
 
   useEffect(() => {
     loadRoutes();
 
-    if (socket) {
-      socket.on('route_updated', (route: Route) => {
-        setRoutes(prev => prev.map(r => r.id === route.id ? route : r));
-      });
-    }
+    const channel = supabase
+      .channel('routes_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'routes' },
+        () => {
+          loadRoutes();
+        }
+      )
+      .subscribe();
 
     return () => {
-      socket?.off('route_updated');
+      supabase.removeChannel(channel);
     };
-  }, [socket]);
+  }, []);
 
   const loadRoutes = async () => {
-    const res = await fetch('/api/routes');
-    const data = await res.json();
-    setRoutes(data);
+    const { data } = await supabase
+      .from('routes')
+      .select('*')
+      .order('day')
+      .order('route_number');
+
+    if (data) setRoutes(data);
   };
 
   const dayNames: Record<string, string> = {
